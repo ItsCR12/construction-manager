@@ -43,68 +43,6 @@ const STATUS_COLORS = { Lead: "bg-gray-200 text-gray-700", Estimating: "bg-amber
 /** @typedef {{ id:string, text:string, done:boolean }} Task */
 /** @typedef {{ id:string, name:string, url:string }} Doc */
 
-
-function ShareDialog({ projectId }) {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("viewer");
-
-  async function shareProject() {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", email)
-      .single();
-
-    if (!profile) {
-      alert("User not found");
-      return;
-    }
-
-    const { error } = await supabase.from("project_members").insert({
-      project_id: projectId,
-      user_id: profile.id,
-      role,
-    });
-
-    if (error) {
-      alert("Error: " + error.message);
-    } else {
-      alert("User added");
-    }
-  }
-
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline">Share</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Share Project</DialogTitle>
-        </DialogHeader>
-        <Input
-          placeholder="User email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <select
-          className="border p-2 rounded mt-2"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        >
-          <option value="viewer">Viewer</option>
-          <option value="editor">Editor</option>
-          <option value="owner">Owner</option>
-        </select>
-        <Button className="mt-4" onClick={shareProject}>
-          Share
-        </Button>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-
 export default function ConstructionProjectManager() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -400,6 +338,7 @@ function ProjectDetail({ project, onChange, onDelete }) {
     return { sub, tax, grand };
   }, [project]);
 
+              <ShareDialog projectId={project.id} />
   // Print packet
   function printPacket() {
     const w = window.open("", "_blank"); if (!w) return;
@@ -845,4 +784,56 @@ function projectToRow(p, ownerId){
   return row;
 }
 
+function ShareDialog({ projectId }) {
+  const [email, setEmail] = React.useState("");
+  const [role, setRole] = React.useState("viewer");
 
+  async function shareProject() {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("email", email)
+      .single();
+
+    if (!profile) {
+      alert("User not found");
+      return;
+    }
+
+    const { error } = await supabase.from("project_members").insert({
+      project_id: projectId,
+      user_id: profile.id,
+      role,
+    });
+
+    if (error) {
+      alert("Error: " + error.message);
+    } else {
+      alert("User added");
+    }
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline">Share</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Share Project</DialogTitle>
+        </DialogHeader>
+        <Input
+          placeholder="User email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          <option value="viewer">Viewer</option>
+          <option value="editor">Editor</option>
+          <option value="owner">Owner</option>
+        </select>
+        <Button onClick={shareProject}>Share</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
