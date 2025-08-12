@@ -102,6 +102,7 @@ function AuthScreen(){
 function AppShell({ session }){
   const user = session.user;
   const [projects, setProjects] = useState([]);
+  const [showShareDialog, setShowShareDialog] = React.useState(false);
   const [activeId, setActiveId] = useState(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -338,7 +339,8 @@ function ProjectDetail({ project, onChange, onDelete }) {
     return { sub, tax, grand };
   }, [project]);
 
-              <ShareDialog projectId={project.id} />
+              <Button variant="outline" onClick={() => setShowShareDialog(true)}>Share</Button>
+              <ShareDialog projectId={project.id} open={showShareDialog} onClose={() => setShowShareDialog(false)} />
   // Print packet
   function printPacket() {
     const w = window.open("", "_blank"); if (!w) return;
