@@ -339,8 +339,10 @@ function ProjectDetail({ project, onChange, onDelete }) {
     return { sub, tax, grand };
   }, [project]);
 
-              <Button variant="outline" onClick={() => setShowShareDialog(true)}>Share</Button>
-              <ShareDialog projectId={project.id} open={showShareDialog} onClose={() => setShowShareDialog(false)} />
+              <>
+                <Button variant="outline" onClick={() => setShowShareDialog(true)}>Share</Button>
+                <ShareDialog projectId={project.id} open={showShareDialog} onClose={() => setShowShareDialog(false)} />
+              </>
   // Print packet
   function printPacket() {
     const w = window.open("", "_blank"); if (!w) return;
