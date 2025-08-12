@@ -19,38 +19,8 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 
 /**
  * === Supabase Setup ===
- * 1) Create a Supabase project.
- * 2) Create two Storage buckets: `photos` and `docs` (public).
- * 3) SQL (run in Supabase SQL editor):
- *
- * create table if not exists projects (
- *   id uuid primary key default gen_random_uuid(),
- *   owner_id uuid not null references auth.users(id) on delete cascade,
- *   name text not null default 'New Project',
- *   address text, city text, state text, zip text,
- *   status text not null default 'Lead',
- *   start_date date, end_date date,
- *   client jsonb not null default '{"name":"","phone":"","email":""}',
- *   pricing jsonb not null default '[]',
- *   notes jsonb not null default '[]',
- *   tasks jsonb not null default '[]',
- *   photos jsonb not null default '[]', -- [{id, url, caption, addedAt}]
- *   docs jsonb not null default '[]',   -- [{id, name, url}]
- *   tax_rate numeric not null default 0.0725,
- *   created_at timestamptz not null default now(),
- *   updated_at timestamptz not null default now()
- * );
- *
- * create index if not exists projects_owner_idx on projects(owner_id);
- *
- * -- RLS
- * alter table projects enable row level security;
- * create policy "owner can select" on projects for select using ( auth.uid() = owner_id );
- * create policy "owner can modify" on projects for all using ( auth.uid() = owner_id ) with check ( auth.uid() = owner_id );
- *
- * 4) In Project Settings → API, copy `Project URL` and `anon` key.
- * 5) Set env vars in your app build:
- *    VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+ * Buckets: photos, docs (public)
+ * Table: projects (+ RLS using project_members), project_members, profiles
  */
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -136,11 +106,18 @@ function AppShell({ session }){
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Ensure my profile exists (so we can find users by email when sharing)
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').upsert({ id: user.id, email: (user.email || '').toLowerCase() }).then(()=>{});
+  }, [user?.id]);
+
   // Initial load & realtime
   useEffect(() => { loadProjects(); }, []);
   useEffect(() => {
     const channel = supabase.channel('projects-ch')
-      .on('postgres_changes', { event:'*', schema:'public', table:'projects', filter:`owner_id=eq.${user.id}` }, (payload) => {
+      .on('postgres_changes', { event:'*', schema:'public', table:'projects' }, () => {
+        // With RLS, we only receive rows we're allowed to see
         loadProjects();
       })
       .subscribe();
@@ -152,51 +129,63 @@ function AppShell({ session }){
     const { data, error } = await supabase
       .from('projects')
       .select('*')
-      .eq('owner_id', user.id)
-      .order('updated_at', { ascending:false });
+      .order('updated_at', { ascending:false }); // RLS restricts to my member projects
     if(!error){
       const mapped = (data||[]).map(row => rowToProject(row));
       setProjects(mapped);
       if(mapped.length && !activeId) setActiveId(mapped[0].id);
+    } else {
+      console.error(error);
     }
     setBusy(false);
   }
 
- async function addProject(){
-  const draft = {
-    // no id here
-    name:'New Project', address:'', city:'', state:'', zip:'',
-    client:{ name:'', phone:'', email:'' },
-    status:'Lead', startDate:'', endDate:'',
-    notes:[], photos:[], pricing:[], tasks:[], docs:[], taxRate: DEFAULT_TAX,
-  };
-  // build the row without id; DB will create it
-  const row = projectToRow(draft, user.id);
-  const { data, error } = await supabase
-    .from('projects')
-    .insert([row])
-    .select()
-    .single();
-  if (error) { alert('Create failed: ' + error.message); return; }
+  async function addProject(){
+    const draft = {
+      name:'New Project', address:'', city:'', state:'', zip:'',
+      client:{ name:'', phone:'', email:'' },
+      status:'Lead', startDate:'', endDate:'',
+      notes:[], photos:[], pricing:[], tasks:[], docs:[], taxRate: DEFAULT_TAX,
+    };
 
-  const proj = rowToProject(data);
-  setProjects(prev => [proj, ...prev]);
-  setActiveId(proj.id);
-}
+    // Build row; DB will generate UUID id
+    const baseRow = projectToRow(draft, user.id);
 
+    // Include created_by so policies allow insert; keep owner_id for legacy NOT NULL
+    const insertRow = { ...baseRow, created_by: user.id, owner_id: user.id };
+
+    const { data: proj, error: insErr } = await supabase
+      .from('projects')
+      .insert([insertRow])
+      .select()
+      .single();
+    if (insErr) { alert('Create failed: ' + insErr.message); return; }
+
+    // Add me as OWNER in membership table
+    const { error: memErr } = await supabase
+      .from('project_members')
+      .insert([{ project_id: proj.id, user_id: user.id, role: 'owner' }]);
+    if (memErr) { alert('Membership failed: ' + memErr.message); /* don’t bail; we still show it */ }
+
+    const mapped = rowToProject(proj);
+    setProjects(prev => [mapped, ...prev]);
+    setActiveId(proj.id);
+  }
 
   async function saveProject(p){
     const { error } = await supabase
       .from('projects')
       .update(projectToRow(p, user.id))
-      .eq('owner_id', user.id)
-      .eq('id', p._row_id || p.id);
+      .eq('id', p._row_id || p.id); // RLS ensures only editors/owners can update
     if(error) console.error(error);
   }
 
   async function deleteProject(p){
     if(!confirm('Delete this project?')) return;
-    const { error } = await supabase.from('projects').delete().eq('owner_id', user.id).eq('id', p._row_id || p.id);
+    const { error } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', p._row_id || p.id); // RLS ensures only owners can delete
     if(error) alert('Delete failed: ' + error.message);
   }
 
@@ -231,8 +220,7 @@ function AppShell({ session }){
       const data = JSON.parse(text);
       if(!Array.isArray(data)) throw new Error('Invalid file');
       for(const p of data){
-        const row = projectToRow(p, user.id);
-        // Upsert by id
+        const row = projectToRow(p, user.id); // guarded id
         await supabase.from('projects').upsert(row);
       }
       await sleep(200);
@@ -332,7 +320,7 @@ function QuickTips({ backend }) {
       <CardContent className="text-sm space-y-2 text-slate-700">
         <div className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5"/><p>{backend? 'Sign in, then create a project. Everything syncs to Supabase.' : 'Create a project, add address & client, then build your estimate with line items.'}</p></div>
         <div className="flex items-start gap-2"><ImageIcon className="w-4 h-4 mt-0.5"/><p>Photos/docs upload to Supabase Storage. URLs are saved in the project.</p></div>
-        <div className="flex items-start gap-2"><Coins className="w-4 h-4 mt-0.5"/><p>Use Pricing to auto‑sum material & labor. Set tax rate per job.</p></div>
+        <div className="flex items-start gap-2"><Coins className="w-4 h-4 mt-0.5"/><p>Use Pricing to auto-sum material & labor. Set tax rate per job.</p></div>
         <div className="flex items-start gap-2"><FileJson className="w-4 h-4 mt-0.5"/><p>Export/Import JSON to migrate or back up.</p></div>
       </CardContent>
     </Card>
@@ -775,7 +763,7 @@ const isUUID = (s) => typeof s === 'string' &&
 
 function projectToRow(p, ownerId){
   const row = {
-    owner_id: ownerId,
+    owner_id: ownerId, // keep for legacy NOT NULL; policies rely on project_members
     name: p.name,
     address: p.address, city: p.city, state: p.state, zip: p.zip,
     status: p.status,
