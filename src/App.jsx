@@ -102,7 +102,6 @@ function AuthScreen(){
 function AppShell({ session }){
   const user = session.user;
   const [projects, setProjects] = useState([]);
-  const [showShareDialog, setShowShareDialog] = React.useState(false);
   const [activeId, setActiveId] = useState(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -339,10 +338,6 @@ function ProjectDetail({ project, onChange, onDelete }) {
     return { sub, tax, grand };
   }, [project]);
 
-              <>
-                <Button variant="outline" onClick={() => setShowShareDialog(true)}>Share</Button>
-                <ShareDialog projectId={project.id} open={showShareDialog} onClose={() => setShowShareDialog(false)} />
-              </>
   // Print packet
   function printPacket() {
     const w = window.open("", "_blank"); if (!w) return;
@@ -373,7 +368,8 @@ function ProjectDetail({ project, onChange, onDelete }) {
             <InlineEdit value={project.name} onChange={(v)=> onChange(p=> ({...p, name:v}))} placeholder="Project name"/>
           </CardTitle>
           <div className="ml-auto flex gap-2">
-            <Button variant="outline" onClick={printPacket}><Printer className="w-4 h-4 mr-1"/>Print packet</Button>
+                        <ShareDialog projectId={project._row_id || project.id} />
+<Button variant="outline" onClick={printPacket}><Printer className="w-4 h-4 mr-1"/>Print packet</Button>
             <DangerMenu onDelete={onDelete} />
           </div>
         </div>
